@@ -1,65 +1,180 @@
-import Image from "next/image";
+'use client';
+
+import { useRef, useState } from 'react';
 
 export default function Home() {
+  const formRef = useRef<HTMLDivElement | null>(null);
+  const [ok, setOk] = useState(false);
+
+  function scrollToForm() {
+    formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+
+    const fd = new FormData(e.currentTarget);
+    const name = String(fd.get('name') || '').trim();
+    const email = String(fd.get('email') || '').trim();
+    const city = String(fd.get('city') || 'Medellín').trim() || 'Medellín';
+    const role = String(fd.get('role') || 'Ambos');
+    const wa = String(fd.get('wa') || '').trim();
+
+    const subject = encodeURIComponent('Lista de espera — Cocina Vecinal');
+    const body = encodeURIComponent(
+      `Hola,\n\nQuiero unirme a la lista de espera de Cocina Vecinal.\n\n` +
+      `Nombre: ${name}\n` +
+      `Email: ${email}\n` +
+      `Ciudad: ${city}\n` +
+      `Interés: ${role}\n` +
+      `WhatsApp: ${wa}\n\n` +
+      `Gracias.`
+    );
+
+    setOk(true);
+    window.location.href = `mailto:info@cocinavecinal.com?subject=${subject}&body=${body}`;
+  }
+
+  async function copyEmail() {
+    const mail = 'info@cocinavecinal.com';
+    try {
+      await navigator.clipboard.writeText(mail);
+      alert(`Copiado: ${mail}`);
+    } catch {
+      prompt('Copia este email:', mail);
+    }
+  }
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <>
+      <style jsx global>{`
+        :root{--bg:#0b0c10;--card:#12141b;--txt:#e9eefb;--muted:#aab3c5;--acc:#ff8a00;--ok:#39d98a}
+        *{box-sizing:border-box}
+        body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial;background:radial-gradient(1200px 800px at 20% 0%,#1a1f2b 0%,var(--bg) 55%),var(--bg);color:var(--txt)}
+        a{color:inherit}
+        .wrap{max-width:980px;margin:0 auto;padding:28px 18px 60px}
+        .top{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+        .brand{display:flex;align-items:center;gap:10px}
+        .logo{width:42px;height:42px;border-radius:12px;background:linear-gradient(135deg,var(--acc),#ffd27a);display:grid;place-items:center;color:#111;font-weight:900}
+        .pill{font-size:12px;color:#111;background:#ffd27a;border-radius:999px;padding:6px 10px;font-weight:700}
+        .hero{margin-top:18px;display:grid;grid-template-columns:1.2fr .8fr;gap:16px}
+        @media(max-width:860px){.hero{grid-template-columns:1fr}}
+        .card{background:rgba(18,20,27,.82);border:1px solid rgba(255,255,255,.08);border-radius:18px;padding:18px;backdrop-filter:blur(6px)}
+        h1{font-size:36px;line-height:1.1;margin:8px 0 10px}
+        p{margin:0 0 10px;color:var(--muted);font-size:16px;line-height:1.5}
+        .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+        @media(max-width:860px){.grid3{grid-template-columns:1fr}}
+        .k{padding:12px;border-radius:14px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06)}
+        .k b{display:block;color:var(--txt);margin-bottom:4px}
+        .cta{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+        button{border:0;border-radius:12px;padding:12px 14px;font-weight:800;cursor:pointer}
+        .primary{background:var(--acc);color:#111}
+        .ghost{background:transparent;border:1px solid rgba(255,255,255,.18);color:var(--txt)}
+        label{display:block;font-weight:700;margin:10px 0 6px}
+        input,select{width:100%;padding:12px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.14);background:#0f1118;color:var(--txt);outline:none}
+        .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+        @media(max-width:860px){.row{grid-template-columns:1fr}}
+        .small{font-size:12px;color:var(--muted);margin-top:10px}
+        .ok{margin-top:10px;padding:10px 12px;border-radius:12px;background:rgba(57,217,138,.12);border:1px solid rgba(57,217,138,.35);color:var(--ok);font-weight:800}
+        footer{margin-top:18px;color:var(--muted);font-size:12px}
+        .links{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px}
+        .links a{opacity:.9}
+      `}</style>
+
+      <div className="wrap">
+        <div className="top">
+          <div className="brand">
+            <div className="logo">CV</div>
+            <div>
+              <div style={{ fontWeight: 900 }}>Cocina Vecinal</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+                Comida casera entre vecinos — Medellín primero
+              </div>
+            </div>
+          </div>
+          <div className="pill">Lista de espera (pre-lanzamiento)</div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        <div className="hero">
+          <div className="card">
+            <h1>Si cocinas en casa, puedes vender. Si no te apetece cocinar, puedes pedir.</h1>
+            <p>
+              Cocina Vecinal conecta <b>cocinas caseras</b> con vecinos que quieren <b>comida asequible y real</b>.
+              Cada persona puede ser <b>oferta</b> y <b>demanda</b> según el día.
+            </p>
+
+            <div className="grid3">
+              <div className="k"><b>Recogida</b><span>Quedas con tu vecino y recoges.</span></div>
+              <div className="k"><b>Entrega</b><span>El cocinero entrega (tarifa por tramos).</span></div>
+              <div className="k"><b>Comer en casa</b><span>Opción “anfitrión” (si el cocinero la habilita).</span></div>
+            </div>
+
+            <div className="cta">
+              <button className="primary" onClick={scrollToForm}>Unirme a la lista de espera</button>
+              <button
+                className="ghost"
+                onClick={() => (window.location.href = 'mailto:info@cocinavecinal.com?subject=Contacto%20Cocina%20Vecinal')}
+              >
+                Contactar
+              </button>
+            </div>
+
+            <footer>
+              <b>Nota:</b> esto es una página temporal para captación y validación. La app se lanza en ~90 días.
+              <div className="links">
+                <a href="mailto:info@cocinavecinal.com">info@cocinavecinal.com</a>
+              </div>
+            </footer>
+          </div>
+
+          <div className="card" ref={formRef}>
+            <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 6 }}>Únete a la lista de espera</div>
+            <p style={{ marginBottom: 12 }}>Te avisaremos cuando abramos en Medellín. (Sin spam)</p>
+
+            <form onSubmit={handleSubmit}>
+              <div className="row">
+                <div>
+                  <label>Nombre</label>
+                  <input name="name" required placeholder="Tu nombre" />
+                </div>
+                <div>
+                  <label>Email</label>
+                  <input name="email" type="email" required placeholder="tu@email.com" />
+                </div>
+              </div>
+
+              <div className="row">
+                <div>
+                  <label>Ciudad</label>
+                  <input name="city" placeholder="Medellín" />
+                </div>
+                <div>
+                  <label>Me interesa como</label>
+                  <select name="role" defaultValue="Ambos">
+                    <option value="Consumidor">Consumidor (quiero pedir)</option>
+                    <option value="Cocinero">Cocinero (quiero vender)</option>
+                    <option value="Ambos">Ambos</option>
+                  </select>
+                </div>
+              </div>
+
+              <label>WhatsApp (opcional)</label>
+              <input name="wa" placeholder="+57 ..." />
+
+              <div className="cta" style={{ marginTop: 12 }}>
+                <button className="primary" type="submit">Apuntarme</button>
+                <button className="ghost" type="button" onClick={copyEmail}>Prefiero escribir por email</button>
+              </div>
+
+              {ok && <div className="ok">¡Listo! Si no se abre tu email, escríbenos a info@cocinavecinal.com</div>}
+
+              <div className="small">
+                Al enviar, se abrirá tu cliente de correo con el mensaje preparado (esto es un MVP sin backend).
+              </div>
+            </form>
+          </div>
         </div>
-      </main>
-    </div>
+      </div>
+    </>
   );
 }
