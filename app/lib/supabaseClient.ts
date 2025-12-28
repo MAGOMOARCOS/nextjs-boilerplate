@@ -1,17 +1,21 @@
-'use client';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import "server-only";
+import { createClient } from "@supabase/supabase-js";
 
-function getEnv(name: string): string {
-  const v = process.env[name];
-  if (!v) {
-    throw new Error(`Missing environment variable ${name}`);
+export function getSupabaseAdmin() {
+  const url = process.env.SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  // OJO: no lanzamos error al importar el archivo.
+  // Solo cuando alguien llama a getSupabaseAdmin() (en runtime).
+  if (!url || !serviceRoleKey) {
+    throw new Error("Missing Supabase environment variables");
   }
-  return v;
+
+  return createClient(url, serviceRoleKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
 }
-
-const SUPABASE_URL = getEnv('NEXT_PUBLIC_SUPABASE_URL');
-const SUPABASE_ANON_KEY = getEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY');
-
-export const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-export default supabase;
