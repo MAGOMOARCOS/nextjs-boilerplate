@@ -4,14 +4,17 @@ import { useRef, useState } from 'react';
 
 export default function Home() {
   const formRef = useRef<HTMLDivElement | null>(null);
-  const [ok, setOk] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   function scrollToForm() {
     formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    setMessage(null);
+    setError(null);
 
     const fd = new FormData(e.currentTarget);
     const name = String(fd.get('name') || '').trim();
@@ -19,29 +22,38 @@ export default function Home() {
     const city = String(fd.get('city') || 'Medellín').trim() || 'Medellín';
     const role = String(fd.get('role') || 'Ambos');
     const wa = String(fd.get('wa') || '').trim();
+    const honeypot = String(fd.get('honeypot') || '').trim();
 
-    const subject = encodeURIComponent('Lista de espera — Cocina Vecinal');
-    const body = encodeURIComponent(
-      `Hola,\n\nQuiero unirme a la lista de espera de Cocina Vecinal.\n\n` +
-      `Nombre: ${name}\n` +
-      `Email: ${email}\n` +
-      `Ciudad: ${city}\n` +
-      `Interés: ${role}\n` +
-      `WhatsApp: ${wa}\n\n` +
-      `Gracias.`
-    );
+    // Basic client validation
+    if (!name || !email) {
+      setError('Nombre y email son requeridos');
+      return;
+    }
 
-    setOk(true);
-    window.location.href = `mailto:info@cocinavecinal.com?subject=${subject}&body=${body}`;
-  }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      setError('Email inválido');
+      return;
+    }
 
-  async function copyEmail() {
-    const mail = 'info@cocinavecinal.com';
     try {
-      await navigator.clipboard.writeText(mail);
-      alert(`Copiado: ${mail}`);
-    } catch {
-      prompt('Copia este email:', mail);
+      const response = await fetch('/api/leads', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name, email, city, role, wa, honeypot }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setMessage(data.message);
+      } else {
+        setError(data.error);
+      }
+    } catch (err) {
+      setError('Error al enviar el formulario');
     }
   }
 
@@ -161,15 +173,17 @@ export default function Home() {
               <label>WhatsApp (opcional)</label>
               <input name="wa" placeholder="+57 ..." />
 
+              <input name="honeypot" type="text" style={{ display: 'none' }} />
+
               <div className="cta" style={{ marginTop: 12 }}>
                 <button className="primary" type="submit">Apuntarme</button>
-                <button className="ghost" type="button" onClick={copyEmail}>Prefiero escribir por email</button>
               </div>
 
-              {ok && <div className="ok">¡Listo! Si no se abre tu email, escríbenos a info@cocinavecinal.com</div>}
+              {message && <div className="ok">{message}</div>}
+              {error && <div style={{ color: 'red', marginTop: 10 }}>{error}</div>}
 
               <div className="small">
-                Al enviar, se abrirá tu cliente de correo con el mensaje preparado (esto es un MVP sin backend).
+                Tus datos se guardarán de forma segura.
               </div>
             </form>
           </div>
