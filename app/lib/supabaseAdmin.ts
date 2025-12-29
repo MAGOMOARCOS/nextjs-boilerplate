@@ -1,31 +1,30 @@
+import 'server-only';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 let _admin: SupabaseClient | null = null;
 
-function mustEnv(name: string, value: string | undefined): string {
-  if (!value || !value.trim()) throw new Error(`Missing env ${name}`);
-  return value.trim();
+function mustEnv(name: string, v?: string) {
+  const val = (v || '').trim();
+  if (!val) throw new Error(`Missing env var: ${name}`);
+  return val;
 }
 
 export function getSupabaseAdmin(): SupabaseClient {
   if (_admin) return _admin;
 
-  const url =
-    process.env.SUPABASE_URL?.trim() ||
-    process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const url = mustEnv(
+    'SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL)',
+    process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
+  );
 
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  const key = mustEnv('SUPABASE_SERVICE_ROLE_KEY', process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-  const supabaseUrl = mustEnv('SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL)', url);
-  const supabaseServiceKey = mustEnv('SUPABASE_SERVICE_ROLE_KEY', serviceKey);
-
-  _admin = createClient(supabaseUrl, supabaseServiceKey, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-      detectSessionInUrl: false,
-    },
+  _admin = createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   });
 
   return _admin;
 }
+
+// ✅ Esto es lo que te falta y lo que arregla el build de /api/leads
+export const supabaseAdmin = getSupabaseAdmin();
