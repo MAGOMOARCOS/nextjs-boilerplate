@@ -1,40 +1,31 @@
-import 'server-only';
-
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-const url =
-  process.env.SUPABASE_URL ||
-  process.env.NEXT_PUBLIC_SUPABASE_URL ||
-  '';
+let _admin: SupabaseClient | null = null;
 
-const serviceRoleKey =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  '';
-
-if (!url) {
-  throw new Error(
-    'Missing SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL). Set it in Vercel Environment Variables.'
-  );
+function mustEnv(name: string, value: string | undefined): string {
+  if (!value || !value.trim()) throw new Error(`Missing env ${name}`);
+  return value.trim();
 }
 
-if (!serviceRoleKey) {
-  throw new Error(
-    'Missing SUPABASE_SERVICE_ROLE_KEY. Set the Supabase Service Role key (sb_secret_*) in Vercel.'
-  );
-}
-
-/**
- * Admin (service-role) client.
- * - Server-only to avoid accidental client bundling.
- * - persistSession disabled (server context).
- */
-export const supabaseAdmin: SupabaseClient = createClient(url, serviceRoleKey, {
-  auth: { persistSession: false },
-});
-
-/**
- * Backwards-compatible helper for routes importing { getSupabaseAdmin }.
- */
 export function getSupabaseAdmin(): SupabaseClient {
-  return supabaseAdmin;
+  if (_admin) return _admin;
+
+  const url =
+    process.env.SUPABASE_URL?.trim() ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+
+  const supabaseUrl = mustEnv('SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL)', url);
+  const supabaseServiceKey = mustEnv('SUPABASE_SERVICE_ROLE_KEY', serviceKey);
+
+  _admin = createClient(supabaseUrl, supabaseServiceKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
+
+  return _admin;
 }
