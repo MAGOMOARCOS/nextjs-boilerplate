@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 
-type Status = 'idle' | 'loading' | 'inserted' | 'exists' | 'error';
+type Status = 'idle' | 'loading' | 'inserted' | 'exists' | 'unknown' | 'error';
+
 
 export default function WaitlistForm() {
   const [name, setName] = useState('');
