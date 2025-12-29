@@ -1,91 +1,67 @@
 import { NextResponse } from 'next/server';
-import { supabaseServer } from '../../lib/supabaseServer';
+import { getSupabaseAdmin } from '@/app/lib/supabaseAdmin';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 type Body = {
   name?: string;
   email?: string;
+  city?: string;
+  role?: string;      // "cook" | "eat" | "both" (o como lo tengas)
+  whatsapp?: string;  // opcional
 };
 
 function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-export async function POST(request: Request) {
-  // Parsear 1 sola vez (nunca vuelvas a leer el body)
-  const body: Body = await request.json().catch(() => ({} as Body));
-  const rawEmail = (body.email || '').trim();
-  const name = (body.name || '').trim() || null;
-
-  if (!rawEmail || !isValidEmail(rawEmail)) {
-    return NextResponse.json({ ok: false, error: 'Invalid email' }, { status: 400 });
-  }
+export async function POST(req: Request) {
+  const errId = (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`);
 
   try {
-    // 1) Intento principal: RPC idempotente
-    try {
-      const rpc = await supabaseServer
-        .rpc('waitlist_add_idempotent', { p_name: name, p_email: rawEmail })
-        .throwOnError();
+    const body: Body = await req.json().catch(() => ({} as Body));
 
-      const rows = rpc.data as Array<{ status: string; waitlist_id: string }>;
-      const row = rows?.[0] ?? null;
+    const name = (body.name || '').trim() || null;
+    const email = (body.email || '').trim().toLowerCase();
+    const city = (body.city || '').trim() || null;
+    const role = (body.role || '').trim() || null;
+    const whatsapp = (body.whatsapp || '').trim() || null;
 
-      if (row) {
-        return NextResponse.json({
-          ok: true,
-          status: row.status === 'inserted' ? 'inserted' : 'exists',
-          id: row.waitlist_id ?? null,
-        });
-      }
-    } catch {
-      // seguimos al fallback
+    if (!email || !isValidEmail(email)) {
+      return NextResponse.json({ ok: false, error: 'Invalid email' }, { status: 400 });
     }
 
-    // 2) Fallback: insert directo
-    const insert = await supabaseServer
-      .from('waitlist')
-      .insert({ name, email: rawEmail })
-      .select('id')
-      .throwOnError()
-      .maybeSingle();
+    const supabase = getSupabaseAdmin();
 
-    if ((insert.data as any)?.id) {
-      return NextResponse.json({ ok: true, status: 'inserted', id: (insert.data as any).id });
+    // ✅ Preferido: RPC idempotente (evita duplicados)
+    const rpc = await supabase
+      .rpc('waitlist_add_idempotent', {
+        p_name: name,
+        p_email: email,
+        p_city: city,
+        p_role: role,
+        p_whatsapp: whatsapp,
+      });
+
+    if (rpc.error) {
+      console.error('[waitlist]', { errId, where: 'rpc', error: rpc.error, env: process.env.VERCEL_ENV });
+      return NextResponse.json(
+        { ok: false, error: 'Internal server error', errId },
+        { status: 500 }
+      );
     }
 
-    // 3) Fallback: buscar existente (case-insensitive)
-    const existing = await supabaseServer
-      .from('waitlist')
-      .select('id')
-      .ilike('email', rawEmail)
-      .limit(1)
-      .maybeSingle();
+    // Esperamos algo como: [{ status: 'inserted' | 'exists' }]
+    const row = Array.isArray(rpc.data) ? rpc.data[0] : rpc.data;
+    const status = (row?.status as string) || 'ok';
 
-    if ((existing.data as any)?.id) {
-      return NextResponse.json({ ok: true, status: 'exists', id: (existing.data as any).id });
-    }
-
-    return NextResponse.json({ ok: false, error: 'Could not add to waitlist' }, { status: 500 });
-  } catch (err: any) {
-    const pgCode = err?.code ?? err?.error?.code ?? null;
-
-    // Duplicado por índice unique(lower(email))
-    if (pgCode === '23505') {
-      try {
-        const existing = await supabaseServer
-          .from('waitlist')
-          .select('id')
-          .ilike('email', rawEmail)
-          .limit(1)
-          .maybeSingle();
-
-        return NextResponse.json({ ok: true, status: 'exists', id: (existing.data as any)?.id ?? null });
-      } catch {
-        return NextResponse.json({ ok: true, status: 'exists', id: null });
-      }
-    }
-
-    console.error('waitlist POST error', err);
-    return NextResponse.json({ ok: false, error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ ok: true, status }, { status: 200 });
+  } catch (e: any) {
+    console.error('[waitlist]', { errId, where: 'catch', message: e?.message, stack: e?.stack, env: process.env.VERCEL_ENV });
+    return NextResponse.json(
+      { ok: false, error: 'Internal server error', errId },
+      { status: 500 }
+    );
   }
 }
