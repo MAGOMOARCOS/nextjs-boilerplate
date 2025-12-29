@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseAdmin } from '../../lib/supabaseAdmin';
+import { supabaseAdmin } from '../../lib/supabaseAdmin';
 
 export const runtime = 'nodejs';
 
@@ -29,18 +29,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: 'Invalid email' }, { status: 400 });
     }
 
-    const supabase = getSupabaseAdmin();
-
-    // Inserta solo campos comunes. Si tu tabla tiene más columnas, las añades luego.
-    const payload: Record<string, any> = {
-      email,
-      source,
-    };
+    const payload: Record<string, any> = { email, source };
     if (name) payload.name = name;
     if (message) payload.message = message;
     if (phone) payload.phone = phone;
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('leads')
       .insert(payload)
       .select('id')
