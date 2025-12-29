@@ -35,14 +35,11 @@ export async function POST(req: Request) {
     const supabase = getSupabaseAdmin();
 
     // ✅ Preferido: RPC idempotente (evita duplicados)
-    const rpc = await supabase
-      .rpc('waitlist_add_idempotent', {
-        p_name: name,
-        p_email: email,
-        p_city: city,
-        p_role: role,
-        p_whatsapp: whatsapp,
-      });
+    const rpc = await supabase.rpc('waitlist_add_idempotent', {
+  p_email: email,
+  p_name: name,
+});
+
 
     if (rpc.error) {
       console.error('[waitlist]', { errId, where: 'rpc', error: rpc.error, env: process.env.VERCEL_ENV });
