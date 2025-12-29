@@ -1,9 +1,13 @@
-import React, { useState } from 'react';
+'use client';
+
+import { useState } from 'react';
+
+type Status = 'idle' | 'loading' | 'inserted' | 'exists' | 'error';
 
 export default function WaitlistForm() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  const [status, setStatus] = useState<'idle' | 'loading' | 'inserted' | 'exists' | 'error'>('idle');
+  const [status, setStatus] = useState<Status>('idle');
   const [message, setMessage] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -15,27 +19,27 @@ export default function WaitlistForm() {
       const res = await fetch('/api/waitlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name || null, email }),
+        body: JSON.stringify({ name: name.trim() || undefined, email: email.trim() }),
       });
 
-      const json = await res.json();
+      const data = (await res.json().catch(() => null)) as
+        | { ok: true; status: 'inserted' | 'exists' | 'unknown'; id?: string | null }
+        | { ok: false; error?: string };
 
-      if (res.ok && json.ok) {
-        if (json.status === 'inserted') {
-          setStatus('inserted');
-          setMessage('¡Listo! Te avisaremos.');
-        } else if (json.status === 'exists') {
-          setStatus('exists');
-          setMessage('Ya estabas apuntado.');
-        } else {
-          setStatus('error');
-          setMessage('Algo inesperado ocurrió. Intenta más tarde.');
-        }
-      } else {
-        setStatus('error');
-        setMessage(json?.error ?? 'Error al enviar. Intenta más tarde.');
+      if (res.ok && data && (data as any).ok) {
+        const st = (data as any).status as Status;
+        setStatus(st === 'unknown' ? 'inserted' : st);
+        setMessage(
+          (data as any).status === 'exists'
+            ? 'Ya estabas en la lista ✅'
+            : '¡Listo! Te hemos apuntado ✅'
+        );
+        return;
       }
-    } catch (err) {
+
+      setStatus('error');
+      setMessage((data as any)?.error || 'Error al apuntarte. Intenta de nuevo.');
+    } catch {
       setStatus('error');
       setMessage('Error de red. Intenta de nuevo.');
     }
@@ -45,15 +49,29 @@ export default function WaitlistForm() {
     <form onSubmit={handleSubmit} className="waitlist-form">
       <label>
         Nombre (opcional)
-        <input name="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Tu nombre" />
+        <input
+          name="name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Tu nombre"
+        />
       </label>
 
       <label>
         Correo electrónico
-        <input required name="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tu@correo.com" />
+        <input
+          required
+          name="email"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="tu@correo.com"
+        />
       </label>
 
-      <button type="submit" disabled={status === 'loading'}>{status === 'loading' ? 'Enviando...' : 'Apuntarme'}</button>
+      <button type="submit" disabled={status === 'loading'}>
+        {status === 'loading' ? 'Enviando...' : 'Apuntarme'}
+      </button>
 
       {message && <p className="message">{message}</p>}
     </form>
