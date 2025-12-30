@@ -1,17 +1,12 @@
-import 'server-only';
-
+// /lib/supabaseServer.ts
 import { createClient } from '@supabase/supabase-js';
 
-const url = process.env.SUPABASE_URL;
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const url = process.env.SUPABASE_URL!;
+const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-if (!url) throw new Error('Missing SUPABASE_URL environment variable.');
-if (!key) {
-  throw new Error(
-    'Missing SUPABASE_SERVICE_ROLE_KEY environment variable. Ensure this is the service role (sb_secret_*) key and NOT the publishable (sb_publishable_*) key.'
-  );
-}
+if (!url) throw new Error('Missing SUPABASE_URL');
+if (!serviceKey) throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY');
 
-export const supabaseServer = createClient(url, key, {
-  auth: { persistSession: false },
+export const supabaseServer = createClient(url, serviceKey, {
+  auth: { persistSession: false, autoRefreshToken: false },
 });
