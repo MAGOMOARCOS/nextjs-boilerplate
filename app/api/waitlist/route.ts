@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseAdmin } from '@/app/lib/supabaseAdmin';
+import { getSupabaseAdmin } from '../../lib/supabaseAdmin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -7,48 +7,37 @@ export const dynamic = 'force-dynamic';
 type Body = {
   name?: string;
   email?: string;
-  city?: string;
-  role?: string;
-  whatsapp?: string;
 };
 
 function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-export async function POST(request: Request) {
+export async function POST(req: Request) {
   const errId =
     typeof crypto !== 'undefined' && 'randomUUID' in crypto
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
   try {
-    const body: Body = await request.json().catch(() => ({} as Body));
+    const body = (await req.json().catch(() => ({} as Body))) as Body;
 
-    const email = (body.email || '').trim();
-    const name = (body.name || '').trim() || null;
-    const city = (body.city || '').trim() || null;
-    const role = (body.role || '').trim() || null;
-    const whatsapp = (body.whatsapp || '').trim() || null;
+    const rawEmail = String(body.email ?? '').trim().toLowerCase();
+    const name = String(body.name ?? '').trim() || null;
 
-    if (!email || !isValidEmail(email)) {
+    if (!rawEmail || !isValidEmail(rawEmail)) {
       return NextResponse.json({ ok: false, error: 'Invalid email' }, { status: 400 });
     }
 
     const supabase = getSupabaseAdmin();
 
+    // ✅ SOLO los 2 params que existen en tu SQL: (p_email, p_name)
     const rpc = await supabase
-      .rpc('waitlist_add_idempotent', {
-        p_city: city,
-        p_email: email,
-        p_name: name,
-        p_role: role,
-        p_whatsapp: whatsapp,
-      })
+      .rpc('waitlist_add_idempotent', { p_email: rawEmail, p_name: name })
       .throwOnError();
 
     const row = Array.isArray(rpc.data) ? rpc.data[0] : rpc.data;
-    const status = (row?.status as string) || 'inserted';
+    const status = (row?.status as string) || 'ok';
 
     return NextResponse.json({ ok: true, status }, { status: 200 });
   } catch (e: any) {
@@ -59,10 +48,6 @@ export async function POST(request: Request) {
       stack: e?.stack,
       env: process.env.VERCEL_ENV,
     });
-
-    return NextResponse.json(
-      { ok: false, error: 'Internal server error', errId },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: 'Internal server error', errId }, { status: 500 });
   }
 }
