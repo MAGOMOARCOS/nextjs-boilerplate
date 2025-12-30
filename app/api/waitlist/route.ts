@@ -34,8 +34,22 @@ export async function POST(req: Request) {
     });
 
     if (rpc.error) {
+      // ✅ TEMP DEBUG: devolvemos el error real (quítalo cuando esté OK)
       console.error('[waitlist]', { errId, where: 'rpc', error: rpc.error, env: process.env.VERCEL_ENV });
-      return NextResponse.json({ ok: false, error: 'Internal server error', errId }, { status: 500 });
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'RPC error',
+          errId,
+          rpc_error: {
+            code: rpc.error.code,
+            message: rpc.error.message,
+            details: rpc.error.details,
+            hint: rpc.error.hint,
+          },
+        },
+        { status: 500 }
+      );
     }
 
     const row = Array.isArray(rpc.data) ? rpc.data[0] : rpc.data;
@@ -43,7 +57,11 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true, status }, { status: 200 });
   } catch (e: any) {
+    // ✅ TEMP DEBUG: devolvemos el mensaje real
     console.error('[waitlist]', { errId, where: 'catch', message: e?.message, stack: e?.stack, env: process.env.VERCEL_ENV });
-    return NextResponse.json({ ok: false, error: 'Internal server error', errId }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: 'Catch error', errId, message: e?.message ?? String(e) },
+      { status: 500 }
+    );
   }
 }
