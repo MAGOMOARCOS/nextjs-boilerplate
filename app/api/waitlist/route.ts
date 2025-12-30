@@ -31,13 +31,14 @@ export async function POST(req: Request) {
 
     const supabase = getSupabaseAdmin();
 
-    // ✅ SOLO los 2 params que existen en tu SQL: (p_email, p_name)
-    const rpc = await supabase
-      .rpc('waitlist_add_idempotent', { p_email: rawEmail, p_name: name })
-      .throwOnError();
+   const rpc = await supabase.rpc('waitlist_add_idempotent', {
+  p_email: email,
+  p_name: name,
+  p_city: city,
+  p_role: role,
+  p_whatsapp: whatsapp,
+});
 
-    const row = Array.isArray(rpc.data) ? rpc.data[0] : rpc.data;
-    const status = (row?.status as string) || 'ok';
 
     return NextResponse.json({ ok: true, status }, { status: 200 });
   } catch (e: any) {
