@@ -1,14 +1,18 @@
 import { NextResponse } from 'next/server';
-import { supabaseServer } from '../../../lib/supabaseServer';
+import { supabaseServer } from '../../lib/supabaseServer';
 
 type Body = {
   name?: string;
   email?: string;
   city?: string;
   role?: string;
-  wa?: string;        // WhatsApp del formulario
-  phone?: string;     // por si algún día lo envías como phone
-  message?: string;
+
+  // compatibilidad por si el frontend manda otro nombre
+  phone?: string;
+  wa?: string;
+  whatsapp?: string;
+
+  source?: string;
   honeypot?: string;
 };
 
@@ -16,119 +20,112 @@ function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-function cleanStr(v: unknown) {
-  const s = String(v ?? '').trim();
-  return s.length ? s : null;
-}
-
-function normalizePhone(v: string | null) {
-  if (!v) return null;
-  // deja + y dígitos, quita espacios/guiones/etc
-  const p = v.replace(/[^\d+]/g, '');
-  return p.length ? p.slice(0, 32) : null;
+// Normaliza teléfono/WhatsApp: deja + y dígitos (sin espacios)
+function normalizePhone(input: string) {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  const cleaned = trimmed.replace(/[^\d+]/g, '');
+  return cleaned || null;
 }
 
 export async function POST(request: Request) {
   try {
     const body: Body = await request.json().catch(() => ({} as Body));
 
-    // Honeypot anti-bots: si viene relleno, respondemos OK sin hacer nada
-    const honeypot = cleanStr(body.honeypot);
-    if (honeypot) {
-      return NextResponse.json({ ok: true, message: '✅ Apuntado.' }, { status: 200 });
+    // Honeypot anti-bots
+    if ((body.honeypot || '').trim()) {
+      return NextResponse.json({ ok: true, message: 'OK' }, { status: 200 });
     }
 
-    const email = cleanStr(body.email);
+    const email = (body.email || '').trim().toLowerCase();
+    const name = (body.name || '').trim() || null;
+    const city = (body.city || '').trim() || null;
+    const role = (body.role || '').trim() || null;
+
+    const phoneRaw = (body.phone || body.wa || body.whatsapp || '').toString();
+    const phone = normalizePhone(phoneRaw);
+
     if (!email || !isValidEmail(email)) {
-      return NextResponse.json({ ok: false, error: 'Email inválido' }, { status: 400 });
+      return NextResponse.json({ ok: false, error: 'Invalid email' }, { status: 400 });
     }
 
-    const name = cleanStr(body.name);
-    const city = cleanStr(body.city);
-    const role = cleanStr(body.role);
-    const message = cleanStr(body.message);
+    const source = (body.source || 'landing').trim() || 'landing';
 
-    // El formulario manda "wa" pero la columna real en tu tabla es "phone"
-    const phone = normalizePhone(cleanStr(body.wa) ?? cleanStr(body.phone));
-
-    const source =
-      request.headers.get('referer') ||
-      request.headers.get('origin') ||
-      'landing';
-
-    // 1) ¿Existe ya?
+    // 1) ¿Existe ya ese email?
     const existing = await supabaseServer
       .from('leads')
-      .select('id, email, name, city, role, phone')
+      .select('id,email,name,city,role,phone')
       .eq('email', email)
       .maybeSingle();
 
     if (existing.error) {
-      console.error('[API /leads] select error', existing.error);
+      console.error('leads select error', existing.error);
       return NextResponse.json({ ok: false, error: 'Database error' }, { status: 500 });
     }
 
-    // 2) Si existe: UPDATE de campos informados (y distintos)
-    if (existing.data) {
-      const updates: Record<string, string> = {};
-
-      if (name && name !== existing.data.name) updates.name = name;
-      if (city && city !== existing.data.city) updates.city = city;
-      if (role && role !== existing.data.role) updates.role = role;
-      if (phone && phone !== existing.data.phone) updates.phone = phone;
-      if (message && message !== (existing.data as any).message) updates.message = message;
-
-      if (Object.keys(updates).length === 0) {
-        return NextResponse.json(
-          { ok: true, status: 'already', message: '✅ Ya estabas apuntado (ese email ya estaba registrado).' },
-          { status: 200 }
-        );
-      }
-
-      const upd = await supabaseServer
+    // 2) Si no existe: INSERT
+    if (!existing.data) {
+      const ins = await supabaseServer
         .from('leads')
-        .update({ ...updates, source })
-        .eq('email', email);
+        .insert({
+          email,
+          name,
+          city,
+          role,
+          phone,
+          source,
+        })
+        .select('id')
+        .single();
 
-      if (upd.error) {
-        console.error('[API /leads] update error', upd.error);
+      if (ins.error) {
+        console.error('leads insert error', ins.error);
         return NextResponse.json({ ok: false, error: 'Database error' }, { status: 500 });
       }
 
       return NextResponse.json(
-        { ok: true, status: 'updated', message: '✅ Ya estabas apuntado y hemos actualizado tus datos.' },
+        { ok: true, message: '✅ Apuntado. Gracias, te contactamos pronto.' },
         { status: 200 }
       );
     }
 
-    // 3) Si no existe: INSERT
-    const payload: Record<string, any> = { email, source };
-    if (name) payload.name = name;
-    if (city) payload.city = city;
-    if (role) payload.role = role;
-    if (phone) payload.phone = phone;
-    if (message) payload.message = message;
+    // 3) Si existe: UPDATE sólo de campos que vengan y cambien
+    const cur = existing.data;
+    const patch: Record<string, any> = {};
 
-    const ins = await supabaseServer.from('leads').insert(payload);
+    if (name && name !== cur.name) patch.name = name;
+    if (city && city !== cur.city) patch.city = city;
+    if (role && role !== cur.role) patch.role = role;
+    if (phone && phone !== cur.phone) patch.phone = phone;
 
-    if (ins.error) {
-      // si hay carrera y se insertó a la vez, tratamos como “ya existe”
-      if (ins.error.code === '23505') {
-        return NextResponse.json(
-          { ok: true, status: 'already', message: '✅ Ya estabas apuntado (ese email ya estaba registrado).' },
-          { status: 200 }
-        );
-      }
-      console.error('[API /leads] insert error', ins.error);
+    // si quieres refrescar "source" siempre, descomenta:
+    // if (source && source !== cur.source) patch.source = source;
+
+    if (Object.keys(patch).length === 0) {
+      return NextResponse.json(
+        { ok: true, message: '✅ Ya estabas apuntado (sin cambios).' },
+        { status: 200 }
+      );
+    }
+
+    const upd = await supabaseServer
+      .from('leads')
+      .update(patch)
+      .eq('id', cur.id)
+      .select('id')
+      .single();
+
+    if (upd.error) {
+      console.error('leads update error', upd.error);
       return NextResponse.json({ ok: false, error: 'Database error' }, { status: 500 });
     }
 
     return NextResponse.json(
-      { ok: true, status: 'inserted', message: '✅ Apuntado. Gracias, te contactamos pronto.' },
+      { ok: true, message: '✅ Datos actualizados (ese email ya estaba registrado).' },
       { status: 200 }
     );
-  } catch (err) {
-    console.error('[API /leads] unexpected error', err);
-    return NextResponse.json({ ok: false, error: 'Database error' }, { status: 500 });
+  } catch (e) {
+    console.error('API /leads fatal', e);
+    return NextResponse.json({ ok: false, error: 'Server error' }, { status: 500 });
   }
 }
