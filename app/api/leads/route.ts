@@ -1,205 +1,184 @@
-import { NextResponse } from 'next/server';
-import { supabaseServer } from '../../lib/supabaseServer';
+// app/api/leads/route.ts
+import { NextResponse } from "next/server";
+import { supabaseServer } from "@/app/lib/supabaseServer";
 
-export const runtime = 'nodejs';
+export const runtime = "nodejs";
 
 type Body = {
-  name?: unknown;
-  email?: unknown;
-  city?: unknown;
-  role?: unknown;
-  message?: unknown;
-
-  // WhatsApp/phone (aceptamos varios nombres por compatibilidad)
-  wa?: unknown;
-  whatsapp?: unknown;
-  whatsApp?: unknown;
-  phone?: unknown;
-  phoneNumber?: unknown;
-  whatsappNumber?: unknown;
-  whatsapp_phone?: unknown;
-  whatsappPhone?: unknown;
-
-  source?: unknown;
-  honeypot?: unknown;
+  name?: string;
+  email?: string;
+  city?: string;
+  role?: string; // "Cocinero", "Consumidor", "Ambos", etc.
+  phone?: string; // WhatsApp (Colombia) -> 10 dígitos
 };
 
-function cleanString(v: unknown): string | null {
-  const s = String(v ?? '').trim();
-  return s.length ? s : null;
-}
-
 function isValidEmail(email: string): boolean {
-  // suficiente para landing (no valida dominio real, solo formato)
-  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email);
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-function normalizePhoneCOStrict10(phoneRaw: string): string | null {
-  // SOLO Colombia: 10 dígitos exactos (sin +57, sin 12, sin 8, sin margen)
-  const digits = phoneRaw.replace(/\D/g, '');
-  return digits.length === 10 ? digits : null;
+// Colombia: si se informa teléfono, debe ser EXACTAMENTE 10 dígitos (permitimos que el usuario escriba +57 y lo normalizamos)
+function normalizeCOPhone(input: string): string | null {
+  const digits = (input || "").replace(/\D/g, "");
+  if (!digits) return null;
+
+  let d = digits;
+
+  // Permite +57XXXXXXXXXX (12 dígitos empezando por 57)
+  if (d.length === 12 && d.startsWith("57")) d = d.slice(2);
+
+  // Si alguien mete 0XXXXXXXXXX (11 dígitos empezando por 0), lo recortamos
+  if (d.length === 11 && d.startsWith("0")) d = d.slice(1);
+
+  if (d.length !== 10) {
+    throw new Error("INVALID_CO_PHONE");
+  }
+
+  return d;
+}
+
+function getSource(request: Request): string {
+  const ref = request.headers.get("referer") || request.headers.get("origin") || "";
+  return ref || "landing";
 }
 
 export async function POST(request: Request) {
   try {
     const body: Body = await request.json().catch(() => ({} as Body));
 
-    // Honeypot anti-bots (si viene relleno, no hacemos nada pero respondemos OK)
-    const honeypot = cleanString(body.honeypot);
-    if (honeypot) {
-      return NextResponse.json({ ok: true, status: 'ignored', message: 'Gracias.' });
-    }
+    const email = (body.email || "").trim().toLowerCase();
+    const name = (body.name || "").trim() || null;
+    const city = (body.city || "").trim() || null;
+    const role = (body.role || "").trim() || null;
 
-    // Email (obligatorio)
-    const emailRaw = cleanString(body.email)?.toLowerCase() ?? '';
-    if (!emailRaw || !isValidEmail(emailRaw)) {
-      return NextResponse.json({ ok: false, error: 'Email inválido.' }, { status: 400 });
-    }
+    const rawPhone = (body.phone || "").trim();
+    let phone: string | null = null;
 
-    // Campos opcionales
-    const name = cleanString(body.name);
-    const city = cleanString(body.city);
-    const role = cleanString(body.role);
-    const message = cleanString(body.message);
-
-    const source =
-      cleanString(body.source) ?? request.headers.get('referer') ?? 'landing';
-
-    // WhatsApp (opcional pero si viene, debe ser válido)
-    const phoneInput =
-      cleanString(body.wa) ??
-      cleanString(body.whatsapp) ??
-      cleanString((body as any).whatsApp) ??
-      cleanString(body.phone) ??
-      cleanString((body as any).phoneNumber) ??
-      cleanString((body as any).whatsappNumber) ??
-      cleanString((body as any).whatsapp_phone) ??
-      cleanString((body as any).whatsappPhone);
-
-    const phone = phoneInput ? normalizePhoneCOStrict10(phoneInput) : null;
-
-    if (phoneInput && !phone) {
+    if (!email || !isValidEmail(email)) {
       return NextResponse.json(
-        {
-          ok: false,
-          error:
-            'WhatsApp inválido: en Colombia debe tener exactamente 10 dígitos (sin +57).',
-        },
+        { ok: false, error: "Email inválido" },
         { status: 400 }
       );
     }
 
-    // 1) Mirar si ya existe el email
+    // Teléfono opcional, pero si se informa debe ser válido (10 dígitos CO)
+    try {
+      phone = normalizeCOPhone(rawPhone);
+    } catch {
+      return NextResponse.json(
+        { ok: false, error: "WhatsApp inválido: en Colombia deben ser 10 dígitos" },
+        { status: 400 }
+      );
+    }
+
+    const source = getSource(request);
+
+    // 1) ¿Existe ya ese email?
     const existing = await supabaseServer
-      .from('leads')
-      .select('id, name, city, role, phone, source')
-      .eq('email', emailRaw)
-      .limit(1);
+      .from("leads")
+      .select("id, phone")
+      .eq("email", email)
+      .maybeSingle();
 
     if (existing.error) {
+      // Si falla el select por algo real, abortamos
+      console.error("[API /leads] select error:", existing.error);
       return NextResponse.json(
-        { ok: false, error: `Database error: ${existing.error.message}` },
+        { ok: false, error: "Database error" },
         { status: 500 }
       );
     }
 
-    const row = existing.data?.[0] ?? null;
+    // 2) Si existe => UPDATE (para permitir corregir / completar teléfono, ciudad, etc.)
+    if (existing.data) {
+      const updatePayload: Record<string, any> = {};
 
-    // 2) Si existe: actualizar solo lo que venga informado (y distinto)
-    if (row) {
-      const patch: Record<string, any> = {};
+      if (name) updatePayload.name = name;
+      if (city) updatePayload.city = city;
+      if (role) updatePayload.role = role;
+      if (phone) updatePayload.phone = phone; // solo actualizamos si viene un teléfono válido
+      if (source) updatePayload.source = source;
 
-      if (name && name !== row.name) patch.name = name;
-      if (city && city !== row.city) patch.city = city;
-      if (role && role !== row.role) patch.role = role;
+      if (Object.keys(updatePayload).length > 0) {
+        const upd = await supabaseServer
+          .from("leads")
+          .update(updatePayload)
+          .eq("id", existing.data.id);
 
-      // message: si llega, lo guardamos (si prefieres NO sobreescribir, dímelo)
-      if (message) patch.message = message;
-
-      if (phone && phone !== row.phone) patch.phone = phone;
-
-      // source: opcionalmente actualizar
-      if (source && source !== row.source) patch.source = source;
-
-      if (Object.keys(patch).length === 0) {
-        return NextResponse.json({
-          ok: true,
-          status: 'exists',
-          message: 'Ya estabas apuntado (ese email ya estaba registrado).',
-        });
-      }
-
-      const upd = await supabaseServer
-        .from('leads')
-        .update(patch)
-        .eq('id', row.id);
-
-      if (upd.error) {
-        return NextResponse.json(
-          { ok: false, error: `Database error: ${upd.error.message}` },
-          { status: 500 }
-        );
+        if (upd.error) {
+          console.error("[API /leads] update error:", upd.error);
+          return NextResponse.json(
+            { ok: false, error: "Database error" },
+            { status: 500 }
+          );
+        }
       }
 
       return NextResponse.json({
         ok: true,
-        status: 'updated',
-        message: 'Ya estabas apuntado. Hemos actualizado tus datos.',
+        status: "updated",
+        message: "✅ Ya estabas apuntado. Hemos actualizado tus datos.",
       });
     }
 
-    // 3) Si NO existe: insertar
-    const ins = await supabaseServer.from('leads').insert({
-      email: emailRaw,
-      name,
-      city,
-      role,
-      phone, // null o 10 dígitos
-      message,
+    // 3) Si NO existe => INSERT
+    const insertPayload: Record<string, any> = {
+      email,
       source,
-    });
+    };
+    if (name) insertPayload.name = name;
+    if (city) insertPayload.city = city;
+    if (role) insertPayload.role = role;
+    if (phone) insertPayload.phone = phone;
 
+    const ins = await supabaseServer.from("leads").insert(insertPayload);
+
+    // Race condition: si justo se insertó entre el select y el insert
     if (ins.error) {
-      // Carrera por unique email: si justo se insertó en paralelo, hacemos update
-      if ((ins.error as any).code === '23505') {
-        const patch: Record<string, any> = {};
-        if (name) patch.name = name;
-        if (city) patch.city = city;
-        if (role) patch.role = role;
-        if (message) patch.message = message;
-        if (phone) patch.phone = phone;
-        if (source) patch.source = source;
+      if (ins.error.code === "23505") {
+        // Unique violation -> hacemos update y listo
+        const updatePayload: Record<string, any> = {};
+        if (name) updatePayload.name = name;
+        if (city) updatePayload.city = city;
+        if (role) updatePayload.role = role;
+        if (phone) updatePayload.phone = phone;
+        if (source) updatePayload.source = source;
 
-        if (Object.keys(patch).length) {
-          await supabaseServer.from('leads').update(patch).eq('email', emailRaw);
-          return NextResponse.json({
-            ok: true,
-            status: 'updated',
-            message: 'Ya estabas apuntado. Hemos actualizado tus datos.',
-          });
+        const upd2 = await supabaseServer
+          .from("leads")
+          .update(updatePayload)
+          .eq("email", email);
+
+        if (upd2.error) {
+          console.error("[API /leads] update-after-23505 error:", upd2.error);
+          return NextResponse.json(
+            { ok: false, error: "Database error" },
+            { status: 500 }
+          );
         }
 
         return NextResponse.json({
           ok: true,
-          status: 'exists',
-          message: 'Ya estabas apuntado (ese email ya estaba registrado).',
+          status: "updated",
+          message: "✅ Ya estabas apuntado. Hemos actualizado tus datos.",
         });
       }
 
+      console.error("[API /leads] insert error:", ins.error);
       return NextResponse.json(
-        { ok: false, error: `Database error: ${ins.error.message}` },
+        { ok: false, error: "Database error" },
         { status: 500 }
       );
     }
 
     return NextResponse.json({
       ok: true,
-      status: 'created',
-      message: 'Apuntado. Gracias, te contactamos pronto.',
+      status: "inserted",
+      message: "✅ Apuntado. Gracias, te contactamos pronto.",
     });
-  } catch (e: any) {
+  } catch (err) {
+    console.error("[API /leads] unexpected error:", err);
     return NextResponse.json(
-      { ok: false, error: `Unexpected error: ${e?.message ?? String(e)}` },
+      { ok: false, error: "Server error" },
       { status: 500 }
     );
   }
