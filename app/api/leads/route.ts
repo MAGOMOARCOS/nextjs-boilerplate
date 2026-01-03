@@ -1,14 +1,12 @@
 import { NextResponse } from 'next/server';
-import { supabaseServer } from '@/app/lib/supabaseServer';
+import { supabaseServer } from '../../lib/supabaseServer';
 
-
-export const runtime = 'nodejs';
-
-type LeadBody = {
+type Body = {
   name?: string;
   email?: string;
-  message?: string;
-  phone?: string;
+  city?: string;
+  interest?: string;   // “Ambos”, “Cocinero”, etc.
+  whatsapp?: string;
   source?: string;
 };
 
@@ -16,43 +14,40 @@ function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-export async function POST(req: Request) {
+export async function POST(request: Request) {
   try {
-    const body: LeadBody = await req.json().catch(() => ({} as LeadBody));
+    const body: Body = await request.json().catch(() => ({} as Body));
 
-    const email = (body.email || '').trim();
+    const email = (body.email || '').trim().toLowerCase();
     const name = (body.name || '').trim() || null;
-    const message = (body.message || '').trim() || null;
-    const phone = (body.phone || '').trim() || null;
-    const source = (body.source || '').trim() || 'landing';
+    const city = (body.city || '').trim() || null;
+    const interest = (body.interest || '').trim() || null;
+    const whatsapp = (body.whatsapp || '').trim() || null;
 
     if (!email || !isValidEmail(email)) {
       return NextResponse.json({ ok: false, error: 'Invalid email' }, { status: 400 });
     }
 
-    const payload: Record<string, any> = { email, source };
-    if (name) payload.name = name;
-    if (message) payload.message = message;
-    if (phone) payload.phone = phone;
+    const source = (body.source || request.headers.get('referer') || '').trim() || null;
 
-    const { data, error } = await supabaseAdmin
+    // Idempotente por email (requiere UNIQUE(email))
+    const { data, error } = await supabaseServer
       .from('leads')
-      .insert(payload)
+      .upsert(
+        { name, email, city, interest, whatsapp, source },
+        { onConflict: 'email' }
+      )
       .select('id')
-      .maybeSingle();
+      .single();
 
     if (error) {
-      console.error('leads insert error', error);
+      console.error('[API /leads] Supabase error:', error);
       return NextResponse.json({ ok: false, error: 'Database error' }, { status: 500 });
     }
 
-    return NextResponse.json({ ok: true, id: (data as any)?.id ?? null }, { status: 200 });
+    return NextResponse.json({ ok: true, id: data?.id }, { status: 200 });
   } catch (e) {
-    console.error('leads route error', e);
-    return NextResponse.json({ ok: false, error: 'Internal server error' }, { status: 500 });
+    console.error('[API /leads] Unexpected error:', e);
+    return NextResponse.json({ ok: false, error: 'Server error' }, { status: 500 });
   }
-}
-
-export async function GET() {
-  return NextResponse.json({ ok: false, error: 'Method Not Allowed' }, { status: 405 });
 }
