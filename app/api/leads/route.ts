@@ -6,85 +6,129 @@ type Body = {
   email?: string;
   city?: string;
   role?: string;
-  wa?: string;       // WhatsApp (opcional) desde el formulario
-  honeypot?: string; // antispam
+  wa?: string;        // WhatsApp del formulario
+  phone?: string;     // por si algún día lo envías como phone
+  message?: string;
+  honeypot?: string;
 };
 
 function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+function cleanStr(v: unknown) {
+  const s = String(v ?? '').trim();
+  return s.length ? s : null;
+}
+
+function normalizePhone(v: string | null) {
+  if (!v) return null;
+  // deja + y dígitos, quita espacios/guiones/etc
+  const p = v.replace(/[^\d+]/g, '');
+  return p.length ? p.slice(0, 32) : null;
+}
+
 export async function POST(request: Request) {
   try {
     const body: Body = await request.json().catch(() => ({} as Body));
 
-    // Honeypot: si viene relleno => spam silencioso (200 OK)
-    if ((body.honeypot || '').trim()) {
-      return NextResponse.json({ ok: true, message: 'OK' }, { status: 200 });
+    // Honeypot anti-bots: si viene relleno, respondemos OK sin hacer nada
+    const honeypot = cleanStr(body.honeypot);
+    if (honeypot) {
+      return NextResponse.json({ ok: true, message: '✅ Apuntado.' }, { status: 200 });
     }
 
-    const rawEmail = (body.email || '').trim();
-    const name = (body.name || '').trim();
-    const city = (body.city || '').trim();
-    const role = (body.role || '').trim();
-    const phone = (body.wa || '').trim();
-
-    if (!rawEmail || !isValidEmail(rawEmail)) {
-      return NextResponse.json({ ok: false, error: 'Invalid email' }, { status: 400 });
+    const email = cleanStr(body.email);
+    if (!email || !isValidEmail(email)) {
+      return NextResponse.json({ ok: false, error: 'Email inválido' }, { status: 400 });
     }
 
-    // Payload de inserción (NO incluyas created_at; que lo ponga la DB)
-    const insertPayload: Record<string, any> = {
-      email: rawEmail,
-      source: 'landing',
-      name: name || null,
-      city: city || null,
-      role: role || null,
-      phone: phone || null,
-    };
+    const name = cleanStr(body.name);
+    const city = cleanStr(body.city);
+    const role = cleanStr(body.role);
+    const message = cleanStr(body.message);
 
-    const { error: insertError } = await supabaseServer.from('leads').insert(insertPayload);
+    // El formulario manda "wa" pero la columna real en tu tabla es "phone"
+    const phone = normalizePhone(cleanStr(body.wa) ?? cleanStr(body.phone));
 
-    // OK -> insertado
-    if (!insertError) {
-      return NextResponse.json(
-        { ok: true, message: '✅ Apuntado. Gracias, te contactamos pronto.' },
-        { status: 200 }
-      );
+    const source =
+      request.headers.get('referer') ||
+      request.headers.get('origin') ||
+      'landing';
+
+    // 1) ¿Existe ya?
+    const existing = await supabaseServer
+      .from('leads')
+      .select('id, email, name, city, role, phone')
+      .eq('email', email)
+      .maybeSingle();
+
+    if (existing.error) {
+      console.error('[API /leads] select error', existing.error);
+      return NextResponse.json({ ok: false, error: 'Database error' }, { status: 500 });
     }
 
-    // Duplicado -> actualizar (permite corregir datos)
-    if (insertError.code === '23505') {
-      // Para no “pisar” con null si el usuario deja un campo vacío,
-      // solo actualizamos lo que venga con valor.
-      const patch: Record<string, any> = { source: 'landing' };
+    // 2) Si existe: UPDATE de campos informados (y distintos)
+    if (existing.data) {
+      const updates: Record<string, string> = {};
 
-      if (name) patch.name = name;
-      if (city) patch.city = city;
-      if (role) patch.role = role;
-      if (phone) patch.phone = phone;
+      if (name && name !== existing.data.name) updates.name = name;
+      if (city && city !== existing.data.city) updates.city = city;
+      if (role && role !== existing.data.role) updates.role = role;
+      if (phone && phone !== existing.data.phone) updates.phone = phone;
+      if (message && message !== (existing.data as any).message) updates.message = message;
 
-      const { error: updateError } = await supabaseServer
+      if (Object.keys(updates).length === 0) {
+        return NextResponse.json(
+          { ok: true, status: 'already', message: '✅ Ya estabas apuntado (ese email ya estaba registrado).' },
+          { status: 200 }
+        );
+      }
+
+      const upd = await supabaseServer
         .from('leads')
-        .update(patch)
-        .eq('email', rawEmail);
+        .update({ ...updates, source })
+        .eq('email', email);
 
-      if (updateError) {
-        console.error('leads update error', updateError);
+      if (upd.error) {
+        console.error('[API /leads] update error', upd.error);
         return NextResponse.json({ ok: false, error: 'Database error' }, { status: 500 });
       }
 
       return NextResponse.json(
-        { ok: true, message: '✅ Ya estabas apuntado. Hemos actualizado tus datos.' },
+        { ok: true, status: 'updated', message: '✅ Ya estabas apuntado y hemos actualizado tus datos.' },
         { status: 200 }
       );
     }
 
-    // Otro error real
-    console.error('leads insert error', insertError);
+    // 3) Si no existe: INSERT
+    const payload: Record<string, any> = { email, source };
+    if (name) payload.name = name;
+    if (city) payload.city = city;
+    if (role) payload.role = role;
+    if (phone) payload.phone = phone;
+    if (message) payload.message = message;
+
+    const ins = await supabaseServer.from('leads').insert(payload);
+
+    if (ins.error) {
+      // si hay carrera y se insertó a la vez, tratamos como “ya existe”
+      if (ins.error.code === '23505') {
+        return NextResponse.json(
+          { ok: true, status: 'already', message: '✅ Ya estabas apuntado (ese email ya estaba registrado).' },
+          { status: 200 }
+        );
+      }
+      console.error('[API /leads] insert error', ins.error);
+      return NextResponse.json({ ok: false, error: 'Database error' }, { status: 500 });
+    }
+
+    return NextResponse.json(
+      { ok: true, status: 'inserted', message: '✅ Apuntado. Gracias, te contactamos pronto.' },
+      { status: 200 }
+    );
+  } catch (err) {
+    console.error('[API /leads] unexpected error', err);
     return NextResponse.json({ ok: false, error: 'Database error' }, { status: 500 });
-  } catch (e) {
-    console.error('API /leads error', e);
-    return NextResponse.json({ ok: false, error: 'Server error' }, { status: 500 });
   }
 }
